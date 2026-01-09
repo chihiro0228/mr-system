@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { API_BASE_URL } from "@/types";
 
 export default function TestAPI() {
   const [result, setResult] = useState<string>("テスト開始...");
@@ -10,7 +11,7 @@ export default function TestAPI() {
       try {
         setResult("APIを呼び出し中...");
 
-        const response = await fetch("http://localhost:8000/products");
+        const response = await fetch(`${API_BASE_URL}/products`);
         const data = await response.json();
 
         setResult(`成功！商品数: ${data.length}\n\n${JSON.stringify(data, null, 2)}`);

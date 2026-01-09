@@ -36,7 +36,5 @@ export type ProductCategory = "グミ" | "サプリメント" | "Snack" | "Noodl
 
 export const CATEGORIES: ProductCategory[] = ["グミ", "サプリメント", "Snack", "Noodles", "Other"];
 
-// Use PC's IP for mobile access, localhost for desktop
-export const API_BASE_URL = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? `http://${window.location.hostname}:8000`
-  : "http://localhost:8000";
+// Use environment variable for production, fallback to localhost for development
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";

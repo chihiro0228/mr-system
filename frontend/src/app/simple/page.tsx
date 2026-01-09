@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { API_BASE_URL } from "@/types";
 
 export default function SimplePage() {
   const [status, setStatus] = useState("初期化中...");
@@ -10,7 +11,7 @@ export default function SimplePage() {
     console.log("useEffect が実行されました");
     setStatus("データを取得中...");
 
-    fetch("http://localhost:8000/products")
+    fetch(`${API_BASE_URL}/products`)
       .then((res) => {
         console.log("レスポンス受信:", res.status);
         return res.json();

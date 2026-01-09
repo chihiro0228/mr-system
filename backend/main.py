@@ -3,20 +3,33 @@ load_dotenv()  # Load .env file before other imports
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-import shutil
 import os
 from typing import List
+import uuid
+from supabase import create_client, Client
 import schemas
 import database
 from services import searcher
 from services.gemini_extractor import extract_with_gemini
 
-# Create uploads directory in parent folder (shared location)
-PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UPLOAD_DIR = os.path.join(PARENT_DIR, "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# Supabase configuration
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+STORAGE_BUCKET = "uploads"
+
+# Initialize Supabase client
+supabase: Client = None
+
+def get_supabase() -> Client:
+    global supabase
+    if supabase is None:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return supabase
+
+# Create temp directory for local file handling
+TEMP_DIR = "/tmp/uploads"
+os.makedirs(TEMP_DIR, exist_ok=True)
 
 
 @asynccontextmanager
@@ -37,7 +50,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+def upload_to_supabase(file_content: bytes, filename: str) -> str:
+    """Upload file to Supabase Storage and return public URL"""
+    sb = get_supabase()
+
+    # Generate unique filename to avoid conflicts
+    unique_filename = f"{uuid.uuid4()}_{filename}"
+
+    # Upload to Supabase Storage
+    sb.storage.from_(STORAGE_BUCKET).upload(
+        path=unique_filename,
+        file=file_content,
+        file_options={"content-type": "image/jpeg"}
+    )
+
+    # Get public URL
+    public_url = sb.storage.from_(STORAGE_BUCKET).get_public_url(unique_filename)
+    return public_url
 
 
 @app.get("/")
@@ -59,22 +89,29 @@ async def upload_images(files: List[UploadFile] = File(...)):
         if not files:
             raise HTTPException(status_code=400, detail="No files provided")
 
-        # Save all uploaded files
+        # Save files temporarily and upload to Supabase
         saved_paths = []
-        image_paths = []
+        image_urls = []
 
         for file in files:
-            file_location = f"{UPLOAD_DIR}/{file.filename}"
-            with open(file_location, "wb+") as file_object:
-                shutil.copyfileobj(file.file, file_object)
-            saved_paths.append(file_location)
-            image_paths.append(f"/uploads/{file.filename}")
+            # Read file content
+            file_content = await file.read()
+
+            # Save temporarily for Gemini extraction
+            temp_path = f"{TEMP_DIR}/{file.filename}"
+            with open(temp_path, "wb") as f:
+                f.write(file_content)
+            saved_paths.append(temp_path)
+
+            # Upload to Supabase Storage
+            public_url = upload_to_supabase(file_content, file.filename)
+            image_urls.append(public_url)
 
         # 1. Extract Data from images using Gemini
         extracted_data = extract_with_gemini(saved_paths)
 
-        # Set first image as legacy image_path for backward compatibility
-        extracted_data["image_path"] = image_paths[0] if image_paths else None
+        # Set first image URL for backward compatibility
+        extracted_data["image_path"] = image_urls[0] if image_urls else None
 
         # 2. Search for prices and product URL
         product_name = extracted_data.get("product_name", "")
@@ -88,13 +125,20 @@ async def upload_images(files: List[UploadFile] = File(...)):
         p_id = database.add_product(extracted_data)
 
         # 4. Save images to product_images table
-        for i, image_path in enumerate(image_paths):
+        for i, image_url in enumerate(image_urls):
             database.add_product_image(
                 product_id=p_id,
-                image_path=image_path,
+                image_path=image_url,
                 is_primary=(i == 0),
                 display_order=i
             )
+
+        # Clean up temp files
+        for temp_path in saved_paths:
+            try:
+                os.remove(temp_path)
+            except:
+                pass
 
         # Return complete product
         return database.get_product_by_id(p_id)
@@ -181,18 +225,17 @@ async def add_product_images(product_id: int, files: List[UploadFile] = File(...
         next_order = len(existing_images)
 
         for i, file in enumerate(files):
-            file_location = f"{UPLOAD_DIR}/{file.filename}"
-            with open(file_location, "wb+") as file_object:
-                shutil.copyfileobj(file.file, file_object)
+            # Read and upload to Supabase
+            file_content = await file.read()
+            public_url = upload_to_supabase(file_content, file.filename)
 
-            image_path = f"/uploads/{file.filename}"
             image_id = database.add_product_image(
                 product_id=product_id,
-                image_path=image_path,
+                image_path=public_url,
                 is_primary=False,
                 display_order=next_order + i
             )
-            added_images.append({"id": image_id, "image_path": image_path})
+            added_images.append({"id": image_id, "image_path": public_url})
 
         return {"added": added_images}
 

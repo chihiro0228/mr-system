@@ -1,110 +1,29 @@
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from typing import List, Dict, Optional
-import json
 import os
 
-# Use parent directory for shared database
-DB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_NAME = os.path.join(DB_DIR, "products.db")
+# Get database URL from environment
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def get_connection():
+    """Get database connection"""
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS products
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  product_name TEXT,
-                  volume TEXT,
-                  manufacturer TEXT,
-                  price_info TEXT,
-                  image_path TEXT,
-                  ingredients TEXT)''')
-
-    # Create product_images table for multiple images
-    c.execute('''CREATE TABLE IF NOT EXISTS product_images
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  product_id INTEGER,
-                  image_path TEXT,
-                  is_primary BOOLEAN DEFAULT 0,
-                  display_order INTEGER DEFAULT 0,
-                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE)''')
-
-    conn.commit()
-    conn.close()
-
-    # Run migration to add new fields
-    migrate_db()
-
-def migrate_db():
-    """Migrate database to new schema with category, appeals, timestamps, nutrition, and tax-excluded price"""
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-
-    # Check if migration needed
-    c.execute("PRAGMA table_info(products)")
-    columns = [col[1] for col in c.fetchall()]
-
-    if 'category' not in columns:
-        print("Migrating database to new schema...")
-
-        # Create new table with enhanced schema
-        c.execute('''CREATE TABLE products_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_name TEXT,
-            volume TEXT,
-            manufacturer TEXT,
-            price_info TEXT,
-            image_path TEXT,
-            ingredients TEXT,
-            category TEXT DEFAULT 'Other',
-            appeals TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )''')
-
-        # Copy existing data
-        c.execute('''INSERT INTO products_new
-                     (id, product_name, volume, manufacturer, price_info, image_path, ingredients)
-                     SELECT id, product_name, volume, manufacturer, price_info, image_path, ingredients
-                     FROM products''')
-
-        # Drop old table and rename
-        c.execute('DROP TABLE products')
-        c.execute('ALTER TABLE products_new RENAME TO products')
-
-        print("Migration completed successfully!")
-
-    # Add nutrition and price_tax_excluded fields if not exist
-    if 'nutrition_energy' not in columns:
-        print("Adding nutrition fields...")
-        try:
-            c.execute('ALTER TABLE products ADD COLUMN nutrition_energy TEXT')
-            c.execute('ALTER TABLE products ADD COLUMN nutrition_protein TEXT')
-            c.execute('ALTER TABLE products ADD COLUMN nutrition_fat TEXT')
-            c.execute('ALTER TABLE products ADD COLUMN nutrition_carbs TEXT')
-            c.execute('ALTER TABLE products ADD COLUMN nutrition_sugar TEXT')
-            c.execute('ALTER TABLE products ADD COLUMN nutrition_fiber TEXT')
-            c.execute('ALTER TABLE products ADD COLUMN nutrition_salt TEXT')
-            c.execute('ALTER TABLE products ADD COLUMN price_tax_excluded TEXT')
-            print("Nutrition fields added successfully!")
-        except sqlite3.OperationalError:
-            pass  # Columns already exist
-
-    # Add seller and product_url fields if not exist
-    if 'seller' not in columns:
-        print("Adding seller and product_url fields...")
-        try:
-            c.execute('ALTER TABLE products ADD COLUMN seller TEXT')
-            c.execute('ALTER TABLE products ADD COLUMN product_url TEXT')
-            print("Seller and product_url fields added successfully!")
-        except sqlite3.OperationalError:
-            pass  # Columns already exist
-
-    conn.commit()
-    conn.close()
+    """Initialize database - tables are created in Supabase"""
+    # Tables are already created in Supabase via SQL Editor
+    # This function now just verifies connection
+    try:
+        conn = get_connection()
+        conn.close()
+        print("Database connection successful!")
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        raise
 
 def add_product(data: Dict) -> int:
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
 
     # Serialize lists to strings
@@ -119,13 +38,14 @@ def add_product(data: Dict) -> int:
                  (product_name, volume, manufacturer, seller, price_info, image_path, ingredients, category, appeals,
                   nutrition_energy, nutrition_protein, nutrition_fat, nutrition_carbs,
                   nutrition_sugar, nutrition_fiber, nutrition_salt, price_tax_excluded, product_url)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 RETURNING id""",
               (data.get("product_name"),
                data.get("volume"),
                data.get("manufacturer"),
                data.get("seller"),
                data.get("price_info"),
-               data.get("image_path"),  # Keep for backward compatibility
+               data.get("image_path"),
                ingredients_str,
                category,
                appeals_str,
@@ -138,8 +58,9 @@ def add_product(data: Dict) -> int:
                nutrition.get("salt"),
                data.get("price_tax_excluded"),
                data.get("product_url")))
+
+    p_id = c.fetchone()["id"]
     conn.commit()
-    p_id = c.lastrowid
     conn.close()
     return p_id
 
@@ -148,28 +69,28 @@ def add_product(data: Dict) -> int:
 
 def add_product_image(product_id: int, image_path: str, is_primary: bool = False, display_order: int = 0) -> int:
     """Add image to product"""
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
 
     # If this is primary, unset other primaries
     if is_primary:
-        c.execute("UPDATE product_images SET is_primary = 0 WHERE product_id = ?", (product_id,))
+        c.execute("UPDATE product_images SET is_primary = false WHERE product_id = %s", (product_id,))
 
     c.execute("""INSERT INTO product_images (product_id, image_path, is_primary, display_order)
-                 VALUES (?, ?, ?, ?)""",
+                 VALUES (%s, %s, %s, %s) RETURNING id""",
               (product_id, image_path, is_primary, display_order))
+
+    image_id = c.fetchone()["id"]
     conn.commit()
-    image_id = c.lastrowid
     conn.close()
     return image_id
 
 
 def get_product_images(product_id: int) -> List[Dict]:
     """Get all images for a product"""
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("""SELECT * FROM product_images WHERE product_id = ?
+    c.execute("""SELECT * FROM product_images WHERE product_id = %s
                  ORDER BY is_primary DESC, display_order ASC""", (product_id,))
     rows = c.fetchall()
     conn.close()
@@ -178,9 +99,9 @@ def get_product_images(product_id: int) -> List[Dict]:
 
 def delete_product_image(image_id: int) -> bool:
     """Delete a product image"""
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM product_images WHERE id = ?", (image_id,))
+    c.execute("DELETE FROM product_images WHERE id = %s", (image_id,))
     conn.commit()
     success = c.rowcount > 0
     conn.close()
@@ -189,16 +110,16 @@ def delete_product_image(image_id: int) -> bool:
 
 def reorder_product_images(product_id: int, image_ids: List[int]) -> bool:
     """Reorder images for a product"""
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
     for order, image_id in enumerate(image_ids):
-        c.execute("UPDATE product_images SET display_order = ?, is_primary = ? WHERE id = ? AND product_id = ?",
-                  (order, 1 if order == 0 else 0, image_id, product_id))
+        c.execute("UPDATE product_images SET display_order = %s, is_primary = %s WHERE id = %s AND product_id = %s",
+                  (order, order == 0, image_id, product_id))
     conn.commit()
     conn.close()
     return True
 
-def _parse_product(row: sqlite3.Row) -> Dict:
+def _parse_product(row: Dict) -> Dict:
     """Parse product row and add related data"""
     p = dict(row)
 
@@ -236,32 +157,30 @@ def _parse_product(row: sqlite3.Row) -> Dict:
 
 
 def get_all_products() -> List[Dict]:
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT * FROM products")
+    c.execute("SELECT * FROM products ORDER BY id DESC")
     rows = c.fetchall()
     conn.close()
 
-    products = [_parse_product(row) for row in rows]
+    products = [_parse_product(dict(row)) for row in rows]
     return products
 
 def get_product_by_id(product_id: int) -> Optional[Dict]:
     """Get single product by ID"""
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT * FROM products WHERE id = ?", (product_id,))
+    c.execute("SELECT * FROM products WHERE id = %s", (product_id,))
     row = c.fetchone()
     conn.close()
 
     if row:
-        return _parse_product(row)
+        return _parse_product(dict(row))
     return None
 
 def update_product(product_id: int, data: Dict) -> bool:
     """Update existing product"""
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
 
     # Serialize lists to strings (handle None values)
@@ -274,12 +193,12 @@ def update_product(product_id: int, data: Dict) -> bool:
     nutrition = data.get("nutrition", {}) or {}
 
     c.execute("""UPDATE products SET
-                 product_name=?, volume=?, manufacturer=?, seller=?, price_info=?, price_tax_excluded=?,
-                 product_url=?, category=?, appeals=?, ingredients=?,
-                 nutrition_energy=?, nutrition_protein=?, nutrition_fat=?, nutrition_carbs=?,
-                 nutrition_sugar=?, nutrition_fiber=?, nutrition_salt=?,
+                 product_name=%s, volume=%s, manufacturer=%s, seller=%s, price_info=%s, price_tax_excluded=%s,
+                 product_url=%s, category=%s, appeals=%s, ingredients=%s,
+                 nutrition_energy=%s, nutrition_protein=%s, nutrition_fat=%s, nutrition_carbs=%s,
+                 nutrition_sugar=%s, nutrition_fiber=%s, nutrition_salt=%s,
                  updated_at=CURRENT_TIMESTAMP
-                 WHERE id=?""",
+                 WHERE id=%s""",
               (data.get("product_name"),
                data.get("volume"),
                data.get("manufacturer"),
@@ -306,9 +225,9 @@ def update_product(product_id: int, data: Dict) -> bool:
 
 def delete_product(product_id: int) -> bool:
     """Delete product"""
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM products WHERE id = ?", (product_id,))
+    c.execute("DELETE FROM products WHERE id = %s", (product_id,))
     conn.commit()
     success = c.rowcount > 0
     conn.close()
@@ -316,12 +235,11 @@ def delete_product(product_id: int) -> bool:
 
 def get_products_by_category(category: str) -> List[Dict]:
     """Get products filtered by category"""
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT * FROM products WHERE category = ?", (category,))
+    c.execute("SELECT * FROM products WHERE category = %s ORDER BY id DESC", (category,))
     rows = c.fetchall()
     conn.close()
 
-    products = [_parse_product(row) for row in rows]
+    products = [_parse_product(dict(row)) for row in rows]
     return products

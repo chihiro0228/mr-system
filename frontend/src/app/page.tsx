@@ -61,7 +61,7 @@ export default function Home() {
   }, [products, selectedCategory, searchQuery]);
 
   const handleUploadSuccess = (newProduct: Product) => {
-    setProducts((prev) => [...prev, newProduct]);
+    setProducts((prev) => [newProduct, ...prev]);
     showToast("商品を追加しました", "success");
   };
 

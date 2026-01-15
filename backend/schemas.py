@@ -11,6 +11,10 @@ class ProductCategory(str, Enum):
     SNACK = "Snack"
     DONUT = "Donut"
     JELLY = "Jelly"
+    NOODLE = "Noodle"
+    SUPPLEMENT = "Supplement"
+    BEVERAGE = "Beverage"
+    PROTEIN = "Protein"
     OTHER = "Other"
 
 

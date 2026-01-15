@@ -32,9 +32,9 @@ export interface Category {
   label: string;
 }
 
-export type ProductCategory = "グミ" | "サプリメント" | "Snack" | "Noodles" | "Other";
+export type ProductCategory = "Chocolate" | "Gummy" | "Cookie" | "Snack" | "Donut" | "Jelly" | "Other";
 
-export const CATEGORIES: ProductCategory[] = ["グミ", "サプリメント", "Snack", "Noodles", "Other"];
+export const CATEGORIES: ProductCategory[] = ["Chocolate", "Gummy", "Cookie", "Snack", "Donut", "Jelly", "Other"];
 
 // API Base URL: Use environment variable in production, fallback to dynamic detection for local dev
 export const API_BASE_URL = (() => {

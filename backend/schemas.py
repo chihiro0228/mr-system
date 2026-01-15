@@ -5,10 +5,12 @@ from enum import Enum
 
 
 class ProductCategory(str, Enum):
-    GUMMY = "グミ"
+    CHOCOLATE = "Chocolate"
+    GUMMY = "Gummy"
+    COOKIE = "Cookie"
     SNACK = "Snack"
-    NOODLES = "Noodles"
-    SUPPLEMENTS = "サプリメント"
+    DONUT = "Donut"
+    JELLY = "Jelly"
     OTHER = "Other"
 
 

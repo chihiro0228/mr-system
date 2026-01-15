@@ -77,3 +77,19 @@ class Product(ProductBase):
 class ImageReorderRequest(BaseModel):
     """Request to reorder images"""
     image_ids: List[int]
+
+
+class ProductImport(BaseModel):
+    """For importing product data from local to cloud"""
+    product_name: Optional[str] = None
+    volume: Optional[str] = None
+    manufacturer: Optional[str] = None
+    seller: Optional[str] = None
+    ingredients: Optional[List[str]] = None
+    appeals: Optional[List[str]] = None
+    price_info: Optional[str] = None
+    price_tax_excluded: Optional[str] = None
+    product_url: Optional[str] = None
+    nutrition: Optional[NutritionInfo] = None
+    category: Optional[str] = "Other"
+    image_path: Optional[str] = None

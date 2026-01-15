@@ -195,6 +195,19 @@ def get_categories():
     return [{"value": cat.value, "label": cat.value} for cat in schemas.ProductCategory]
 
 
+# ===== Data Migration Endpoint =====
+
+@app.post("/products/import")
+def import_product(product_data: schemas.ProductImport):
+    """Import product data (for migration from local to cloud)"""
+    try:
+        data = product_data.model_dump()
+        p_id = database.add_product(data)
+        return {"status": "imported", "id": p_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ===== Image Management Endpoints =====
 
 @app.post("/products/{product_id}/images")

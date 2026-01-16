@@ -39,7 +39,18 @@ EXTRACTION_PROMPT = """
    - fiber: 食物繊維（例: "2.0g"）
    - salt: 食塩相当量（例: "0.5g"）
 7. appeals: 訴求ポイント・特徴のリスト（例: ["無添加", "国産", "低糖質", "高タンパク"]）
-8. category: 商品カテゴリ（以下から選択: "グミ", "サプリメント", "スナック", "麺類", "その他"）
+8. category: 商品カテゴリ（以下から最も適切なものを1つ選択）
+   - "Chocolate": チョコレート、チョコ菓子
+   - "Gummy": グミ、ソフトキャンディ
+   - "Cookie": クッキー、ビスケット、焼き菓子
+   - "Snack": スナック菓子、ポテトチップス、せんべい
+   - "Donut": ドーナツ
+   - "Jelly": ゼリー、プリン、ムース
+   - "Noodle": 麺類、ラーメン、うどん、そば
+   - "Supplement": サプリメント、ビタミン剤、健康食品
+   - "Beverage": 飲料、ドリンク、ジュース
+   - "Protein": プロテイン、プロテインバー
+   - "Other": 上記に該当しないもの
 
 必ず以下のJSON形式で回答してください：
 ```json
@@ -59,7 +70,7 @@ EXTRACTION_PROMPT = """
     "salt": "0.5g"
   },
   "appeals": ["特徴1", "特徴2"],
-  "category": "カテゴリ"
+  "category": "カテゴリ名（英語）"
 }
 ```
 """
@@ -171,15 +182,43 @@ def _normalize_category(category: Optional[str]) -> str:
     if not category:
         return "Other"
 
+    # Valid English category names
+    valid_categories = [
+        "Chocolate", "Gummy", "Cookie", "Snack", "Donut",
+        "Jelly", "Noodle", "Supplement", "Beverage", "Protein", "Other"
+    ]
+
+    # If already valid, return as-is
+    if category in valid_categories:
+        return category
+
+    # Map Japanese to English
     category_map = {
-        "グミ": "グミ",
-        "サプリメント": "サプリメント",
+        # Japanese mappings
+        "チョコレート": "Chocolate",
+        "チョコ": "Chocolate",
+        "グミ": "Gummy",
+        "クッキー": "Cookie",
+        "ビスケット": "Cookie",
+        "焼き菓子": "Cookie",
         "スナック": "Snack",
-        "麺類": "Noodles",
+        "せんべい": "Snack",
+        "ドーナツ": "Donut",
+        "ゼリー": "Jelly",
+        "プリン": "Jelly",
+        "麺類": "Noodle",
+        "ラーメン": "Noodle",
+        "うどん": "Noodle",
+        "そば": "Noodle",
+        "サプリメント": "Supplement",
+        "健康食品": "Supplement",
+        "飲料": "Beverage",
+        "ドリンク": "Beverage",
+        "ジュース": "Beverage",
+        "プロテイン": "Protein",
         "その他": "Other",
-        "Snack": "Snack",
-        "Noodles": "Noodles",
-        "Other": "Other"
+        # Old category mappings for backwards compatibility
+        "Noodles": "Noodle",
     }
 
     return category_map.get(category, "Other")

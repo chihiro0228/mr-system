@@ -160,15 +160,16 @@ def _parse_gemini_response(response_text: str) -> Dict:
         data = json.loads(json_str)
 
         # Normalize the data
+        product_name = data.get("product_name") or "Unknown Product"
         return {
-            "product_name": data.get("product_name") or "Unknown Product",
+            "product_name": product_name,
             "manufacturer": data.get("manufacturer") or "Unknown Manufacturer",
             "seller": data.get("seller"),
             "volume": data.get("volume") or "Unknown",
             "ingredients": data.get("ingredients") or [],
             "nutrition": data.get("nutrition") or {},
             "appeals": data.get("appeals") or [],
-            "category": _normalize_category(data.get("category"))
+            "category": _normalize_category(data.get("category"), product_name)
         }
 
     except json.JSONDecodeError as e:
@@ -177,20 +178,13 @@ def _parse_gemini_response(response_text: str) -> Dict:
         return _get_mock_data()
 
 
-def _normalize_category(category: Optional[str]) -> str:
-    """Normalize category to valid values"""
-    if not category:
-        return "Other"
-
+def _normalize_category(category: Optional[str], product_name: Optional[str] = None) -> str:
+    """Normalize category to valid values, also check product name for category hints"""
     # Valid English category names
     valid_categories = [
         "Chocolate", "Gummy", "Cookie", "Snack", "Donut",
         "Jelly", "Noodle", "Supplement", "Beverage", "Protein", "Other"
     ]
-
-    # If already valid, return as-is
-    if category in valid_categories:
-        return category
 
     # Map Japanese to English
     category_map = {
@@ -221,7 +215,36 @@ def _normalize_category(category: Optional[str]) -> str:
         "Noodles": "Noodle",
     }
 
-    return category_map.get(category, "Other")
+    # Keywords to detect category from product name (Japanese and English)
+    name_keywords = {
+        "Chocolate": ["チョコ", "chocolate", "Chocolate", "ショコラ"],
+        "Gummy": ["グミ", "gummy", "Gummy", "ガム"],
+        "Cookie": ["クッキー", "cookie", "Cookie", "ビスケット", "biscuit"],
+        "Snack": ["スナック", "snack", "Snack", "チップス", "chips", "せんべい"],
+        "Donut": ["ドーナツ", "donut", "Donut", "ドーナッツ"],
+        "Jelly": ["ゼリー", "jelly", "Jelly", "プリン", "pudding"],
+        "Noodle": ["麺", "ラーメン", "うどん", "そば", "noodle", "Noodle", "ヌードル"],
+        "Supplement": ["サプリ", "supplement", "Supplement", "ビタミン", "vitamin"],
+        "Beverage": ["飲料", "ドリンク", "ジュース", "beverage", "Beverage", "drink"],
+        "Protein": ["プロテイン", "protein", "Protein"],
+    }
+
+    # First, try to detect from product name
+    if product_name:
+        product_name_lower = product_name.lower()
+        for cat, keywords in name_keywords.items():
+            for keyword in keywords:
+                if keyword.lower() in product_name_lower:
+                    return cat
+
+    # If category is provided and valid, return it
+    if category:
+        if category in valid_categories:
+            return category
+        if category in category_map:
+            return category_map[category]
+
+    return "Other"
 
 
 def _get_mock_data() -> Dict:

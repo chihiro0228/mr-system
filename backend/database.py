@@ -375,12 +375,12 @@ def get_all_products() -> List[Dict]:
 
     if USE_POSTGRES:
         with conn.cursor(row_factory=dict_row) as c:
-            c.execute("SELECT * FROM products")
+            c.execute("SELECT * FROM products ORDER BY created_at DESC")
             rows = [dict(row) for row in c.fetchall()]  # Convert to dicts before closing
     else:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        c.execute("SELECT * FROM products")
+        c.execute("SELECT * FROM products ORDER BY created_at DESC")
         rows = [dict(row) for row in c.fetchall()]
 
     conn.close()
@@ -509,12 +509,12 @@ def get_products_by_category(category: str) -> List[Dict]:
 
     if USE_POSTGRES:
         with conn.cursor(row_factory=dict_row) as c:
-            c.execute("SELECT * FROM products WHERE category = %s", (category,))
+            c.execute("SELECT * FROM products WHERE category = %s ORDER BY created_at DESC", (category,))
             rows = [dict(row) for row in c.fetchall()]  # Convert to dicts before closing
     else:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        c.execute("SELECT * FROM products WHERE category = ?", (category,))
+        c.execute("SELECT * FROM products WHERE category = ? ORDER BY created_at DESC", (category,))
         rows = [dict(row) for row in c.fetchall()]
 
     conn.close()

@@ -266,13 +266,12 @@ def get_product_images(product_id: int) -> List[Dict]:
     conn = get_connection()
 
     if USE_POSTGRES:
-        conn.row_factory = dict_row
-        c = conn.cursor()
-        c.execute("""SELECT * FROM product_images WHERE product_id = %s
-                     ORDER BY is_primary DESC, display_order ASC""", (product_id,))
-        rows = c.fetchall()
+        with conn.cursor(row_factory=dict_row) as c:
+            c.execute("""SELECT * FROM product_images WHERE product_id = %s
+                         ORDER BY is_primary DESC, display_order ASC""", (product_id,))
+            rows = c.fetchall()
         conn.close()
-        return [dict(row) for row in rows]
+        return list(rows)
     else:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
@@ -363,10 +362,9 @@ def get_all_products() -> List[Dict]:
     conn = get_connection()
 
     if USE_POSTGRES:
-        conn.row_factory = dict_row
-        c = conn.cursor()
-        c.execute("SELECT * FROM products")
-        rows = c.fetchall()
+        with conn.cursor(row_factory=dict_row) as c:
+            c.execute("SELECT * FROM products")
+            rows = c.fetchall()
     else:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
@@ -383,10 +381,9 @@ def get_product_by_id(product_id: int) -> Optional[Dict]:
     conn = get_connection()
 
     if USE_POSTGRES:
-        conn.row_factory = dict_row
-        c = conn.cursor()
-        c.execute("SELECT * FROM products WHERE id = %s", (product_id,))
-        row = c.fetchone()
+        with conn.cursor(row_factory=dict_row) as c:
+            c.execute("SELECT * FROM products WHERE id = %s", (product_id,))
+            row = c.fetchone()
     else:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
@@ -494,10 +491,9 @@ def get_products_by_category(category: str) -> List[Dict]:
     conn = get_connection()
 
     if USE_POSTGRES:
-        conn.row_factory = dict_row
-        c = conn.cursor()
-        c.execute("SELECT * FROM products WHERE category = %s", (category,))
-        rows = c.fetchall()
+        with conn.cursor(row_factory=dict_row) as c:
+            c.execute("SELECT * FROM products WHERE category = %s", (category,))
+            rows = c.fetchall()
     else:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()

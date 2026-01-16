@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useParams } from "next/navigation";
 import axios from "axios";
 import { Toast, useToast } from "@/components/Toast";
 import ImageGallery from "@/components/ImageGallery";
 import { Product, API_BASE_URL, CATEGORIES } from "@/types";
 
-export default function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const resolvedParams = use(params);
+export default function ProductDetailPage() {
+  const params = useParams();
+  const productId = params.id as string;
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,12 +19,14 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
   const { toast, showToast, hideToast } = useToast();
 
   useEffect(() => {
-    fetchProduct();
-  }, [resolvedParams.id]);
+    if (productId) {
+      fetchProduct();
+    }
+  }, [productId]);
 
   const fetchProduct = async () => {
     try {
-      const res = await axios.get<Product>(`${API_BASE_URL}/products/${resolvedParams.id}`);
+      const res = await axios.get<Product>(`${API_BASE_URL}/products/${productId}`);
       setProduct(res.data);
       setError(null);
     } catch (err: unknown) {
@@ -42,7 +45,7 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
 
     setIsDeleting(true);
     try {
-      await axios.delete(`${API_BASE_URL}/products/${resolvedParams.id}`);
+      await axios.delete(`${API_BASE_URL}/products/${productId}`);
       showToast("商品を削除しました", "success");
       setTimeout(() => router.push("/"), 1000);
     } catch (err) {

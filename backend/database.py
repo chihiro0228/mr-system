@@ -261,6 +261,15 @@ def add_product_image(product_id: int, image_path: str, is_primary: bool = False
     return image_id
 
 
+def _convert_datetime_fields(row: Dict) -> Dict:
+    """Convert datetime fields to ISO format strings"""
+    if row.get("created_at") and hasattr(row["created_at"], "isoformat"):
+        row["created_at"] = row["created_at"].isoformat()
+    if row.get("updated_at") and hasattr(row["updated_at"], "isoformat"):
+        row["updated_at"] = row["updated_at"].isoformat()
+    return row
+
+
 def get_product_images(product_id: int) -> List[Dict]:
     """Get all images for a product"""
     conn = get_connection()
@@ -269,7 +278,7 @@ def get_product_images(product_id: int) -> List[Dict]:
         with conn.cursor(row_factory=dict_row) as c:
             c.execute("""SELECT * FROM product_images WHERE product_id = %s
                          ORDER BY is_primary DESC, display_order ASC""", (product_id,))
-            rows = [dict(row) for row in c.fetchall()]  # Convert to dicts before closing
+            rows = [_convert_datetime_fields(dict(row)) for row in c.fetchall()]
         conn.close()
         return rows
     else:
@@ -346,6 +355,9 @@ def _parse_product(row) -> Dict:
         "fiber": p.pop("nutrition_fiber", None),
         "salt": p.pop("nutrition_salt", None),
     }
+
+    # Convert datetime objects to strings (PostgreSQL returns datetime objects)
+    _convert_datetime_fields(p)
 
     # Get associated images
     images = get_product_images(p["id"])

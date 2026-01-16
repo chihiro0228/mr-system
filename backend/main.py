@@ -13,6 +13,7 @@ import database
 from services import searcher
 from services.gemini_extractor import extract_with_gemini
 from services.image_uploader import get_image_url, USE_CLOUDINARY
+from services.image_converter import process_uploaded_image
 
 # Create uploads directory (for local development or temporary storage)
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -86,10 +87,13 @@ async def upload_images(files: List[UploadFile] = File(...)):
             file_location = f"{UPLOAD_DIR}/{file.filename}"
             with open(file_location, "wb+") as file_object:
                 shutil.copyfileobj(file.file, file_object)
+
+            # Convert HEIC to JPEG if necessary
+            file_location, filename = process_uploaded_image(file_location, file.filename)
             saved_paths.append(file_location)
 
             # Get the final URL (Cloudinary or local)
-            image_url = get_image_url(file_location, file.filename)
+            image_url = get_image_url(file_location, filename)
             image_urls.append(image_url)
 
         # 1. Extract Data from images using Gemini
@@ -229,8 +233,11 @@ async def add_product_images(product_id: int, files: List[UploadFile] = File(...
             with open(file_location, "wb+") as file_object:
                 shutil.copyfileobj(file.file, file_object)
 
+            # Convert HEIC to JPEG if necessary
+            file_location, filename = process_uploaded_image(file_location, file.filename)
+
             # Get the final URL
-            image_url = get_image_url(file_location, file.filename)
+            image_url = get_image_url(file_location, filename)
 
             image_id = database.add_product_image(
                 product_id=product_id,

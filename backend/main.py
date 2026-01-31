@@ -13,7 +13,7 @@ import database
 from services import searcher
 from services.gemini_extractor import extract_with_gemini
 from services.image_uploader import get_image_url, USE_CLOUDINARY
-from services.image_converter import process_uploaded_image
+from services.image_converter import process_uploaded_image, get_photo_taken_at
 
 # Create uploads directory (for local development or temporary storage)
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -81,6 +81,7 @@ async def upload_images(files: List[UploadFile] = File(...)):
         # Save all uploaded files
         saved_paths = []
         image_urls = []
+        taken_at_list = []
 
         for file in files:
             # Save to local storage first (needed for Gemini processing)
@@ -88,9 +89,17 @@ async def upload_images(files: List[UploadFile] = File(...)):
             with open(file_location, "wb+") as file_object:
                 shutil.copyfileobj(file.file, file_object)
 
+            # Extract EXIF taken_at before conversion (HEIC files have EXIF too)
+            taken_at = get_photo_taken_at(file_location)
+
             # Convert HEIC to JPEG if necessary
             file_location, filename = process_uploaded_image(file_location, file.filename)
             saved_paths.append(file_location)
+
+            # If taken_at was not found before conversion, try again on converted file
+            if taken_at is None:
+                taken_at = get_photo_taken_at(file_location)
+            taken_at_list.append(taken_at)
 
             # Get the final URL (Cloudinary or local)
             image_url = get_image_url(file_location, filename)
@@ -119,7 +128,8 @@ async def upload_images(files: List[UploadFile] = File(...)):
                 product_id=p_id,
                 image_path=image_url,
                 is_primary=(i == 0),
-                display_order=i
+                display_order=i,
+                taken_at=taken_at_list[i]
             )
 
         # Clean up local files if using Cloudinary
@@ -233,8 +243,15 @@ async def add_product_images(product_id: int, files: List[UploadFile] = File(...
             with open(file_location, "wb+") as file_object:
                 shutil.copyfileobj(file.file, file_object)
 
+            # Extract EXIF taken_at before conversion
+            taken_at = get_photo_taken_at(file_location)
+
             # Convert HEIC to JPEG if necessary
             file_location, filename = process_uploaded_image(file_location, file.filename)
+
+            # If taken_at was not found before conversion, try again on converted file
+            if taken_at is None:
+                taken_at = get_photo_taken_at(file_location)
 
             # Get the final URL
             image_url = get_image_url(file_location, filename)
@@ -243,7 +260,8 @@ async def add_product_images(product_id: int, files: List[UploadFile] = File(...
                 product_id=product_id,
                 image_path=image_url,
                 is_primary=False,
-                display_order=next_order + i
+                display_order=next_order + i,
+                taken_at=taken_at
             )
             added_images.append({"id": image_id, "image_path": image_url})
 
@@ -299,3 +317,92 @@ def get_product_images_endpoint(product_id: int):
 
     images = database.get_product_images(product_id)
     return images
+
+
+@app.post("/admin/update-taken-at")
+async def update_all_taken_at():
+    """
+    Fetch taken_at from Cloudinary EXIF data for all images that don't have it.
+    This is a one-time migration endpoint.
+    """
+    import requests
+    from datetime import datetime
+
+    if not USE_CLOUDINARY:
+        raise HTTPException(status_code=400, detail="Cloudinary is not configured")
+
+    # Get Cloudinary credentials from environment
+    cloudinary_url = os.environ.get("CLOUDINARY_URL", "")
+    if not cloudinary_url:
+        raise HTTPException(status_code=400, detail="CLOUDINARY_URL not set")
+
+    # Parse cloudinary URL: cloudinary://api_key:api_secret@cloud_name
+    try:
+        parts = cloudinary_url.replace("cloudinary://", "").split("@")
+        cloud_name = parts[1]
+        creds = parts[0].split(":")
+        api_key = creds[0]
+        api_secret = creds[1]
+    except:
+        raise HTTPException(status_code=400, detail="Invalid CLOUDINARY_URL format")
+
+    all_images = database.get_all_product_images()
+    updated = 0
+    errors = []
+
+    for img in all_images:
+        if img.get("taken_at"):
+            continue  # Already has taken_at
+
+        image_path = img.get("image_path", "")
+        if "cloudinary" not in image_path:
+            continue
+
+        try:
+            # Extract public_id from URL
+            # URL format: https://res.cloudinary.com/{cloud}/image/upload/v{version}/{folder}/{public_id}.{ext}
+            url_parts = image_path.split("/upload/")
+            if len(url_parts) < 2:
+                continue
+            path_part = url_parts[1]
+            # Remove version if present (v1234567890/)
+            if path_part.startswith("v") and "/" in path_part:
+                path_part = path_part.split("/", 1)[1]
+            # Remove extension
+            public_id = path_part.rsplit(".", 1)[0]
+
+            # Get image info from Cloudinary Admin API
+            api_url = f"https://api.cloudinary.com/v1_1/{cloud_name}/resources/image/upload/{public_id}"
+            response = requests.get(
+                api_url,
+                auth=(api_key, api_secret),
+                params={"exif": "true", "image_metadata": "true"}
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                exif = data.get("exif", {}) or {}
+                image_metadata = data.get("image_metadata", {}) or {}
+
+                # Try to get DateTimeOriginal from EXIF
+                date_str = exif.get("DateTimeOriginal") or image_metadata.get("DateTimeOriginal")
+
+                if date_str:
+                    # Parse EXIF date format: "2024:01:15 10:30:45"
+                    try:
+                        taken_at = datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+                        database.update_image_taken_at(img["id"], taken_at)
+                        updated += 1
+                    except ValueError:
+                        errors.append(f"Image {img['id']}: Invalid date format: {date_str}")
+            else:
+                errors.append(f"Image {img['id']}: API error {response.status_code}")
+
+        except Exception as e:
+            errors.append(f"Image {img['id']}: {str(e)}")
+
+    return {
+        "updated": updated,
+        "total_images": len(all_images),
+        "errors": errors[:10] if errors else []
+    }

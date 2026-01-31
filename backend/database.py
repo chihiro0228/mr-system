@@ -62,6 +62,7 @@ def init_db():
             image_path TEXT,
             is_primary BOOLEAN DEFAULT FALSE,
             display_order INTEGER DEFAULT 0,
+            taken_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
     else:
@@ -81,15 +82,37 @@ def init_db():
                       image_path TEXT,
                       is_primary BOOLEAN DEFAULT 0,
                       display_order INTEGER DEFAULT 0,
+                      taken_at TIMESTAMP,
                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                       FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE)''')
 
     conn.commit()
     conn.close()
 
-    # Run migration for SQLite
-    if not USE_POSTGRES:
+    # Run migrations
+    if USE_POSTGRES:
+        migrate_postgres_db()
+    else:
         migrate_db()
+
+
+def migrate_postgres_db():
+    """Migrate PostgreSQL database to add new columns"""
+    conn = get_connection()
+    c = conn.cursor()
+
+    # Add taken_at column to product_images if not exists
+    try:
+        c.execute("""
+            ALTER TABLE product_images
+            ADD COLUMN IF NOT EXISTS taken_at TIMESTAMP
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"PostgreSQL migration note: {e}")
+        conn.rollback()
+
+    conn.close()
 
 
 def migrate_db():
@@ -156,6 +179,18 @@ def migrate_db():
             print("Seller and product_url fields added successfully!")
         except sqlite3.OperationalError:
             pass  # Columns already exist
+
+    # Migrate product_images table to add taken_at column
+    c.execute("PRAGMA table_info(product_images)")
+    image_columns = [col[1] for col in c.fetchall()]
+
+    if 'taken_at' not in image_columns:
+        print("Adding taken_at column to product_images...")
+        try:
+            c.execute('ALTER TABLE product_images ADD COLUMN taken_at TIMESTAMP')
+            print("taken_at column added successfully!")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
     conn.commit()
     conn.close()
@@ -232,7 +267,7 @@ def add_product(data: Dict) -> int:
 
 # ===== Product Images Functions =====
 
-def add_product_image(product_id: int, image_path: str, is_primary: bool = False, display_order: int = 0) -> int:
+def add_product_image(product_id: int, image_path: str, is_primary: bool = False, display_order: int = 0, taken_at=None) -> int:
     """Add image to product"""
     conn = get_connection()
     c = conn.cursor()
@@ -242,18 +277,18 @@ def add_product_image(product_id: int, image_path: str, is_primary: bool = False
         if is_primary:
             c.execute("UPDATE product_images SET is_primary = FALSE WHERE product_id = %s", (product_id,))
 
-        c.execute("""INSERT INTO product_images (product_id, image_path, is_primary, display_order)
-                     VALUES (%s, %s, %s, %s) RETURNING id""",
-                  (product_id, image_path, is_primary, display_order))
+        c.execute("""INSERT INTO product_images (product_id, image_path, is_primary, display_order, taken_at)
+                     VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                  (product_id, image_path, is_primary, display_order, taken_at))
         image_id = c.fetchone()[0]
     else:
         # If this is primary, unset other primaries
         if is_primary:
             c.execute("UPDATE product_images SET is_primary = 0 WHERE product_id = ?", (product_id,))
 
-        c.execute("""INSERT INTO product_images (product_id, image_path, is_primary, display_order)
-                     VALUES (?, ?, ?, ?)""",
-                  (product_id, image_path, is_primary, display_order))
+        c.execute("""INSERT INTO product_images (product_id, image_path, is_primary, display_order, taken_at)
+                     VALUES (?, ?, ?, ?, ?)""",
+                  (product_id, image_path, is_primary, display_order, taken_at))
         image_id = c.lastrowid
 
     conn.commit()
@@ -271,11 +306,12 @@ def _convert_datetime_fields(row: Dict) -> Dict:
 
 
 def get_product_images(product_id: int) -> List[Dict]:
-    """Get all images for a product"""
+    """Get all images for a product, sorted by taken_at (photo taken time)"""
     conn = get_connection()
 
     if USE_POSTGRES:
         with conn.cursor(row_factory=dict_row) as c:
+            # Sort by: primary first, then by upload selection order (display_order)
             c.execute("""SELECT * FROM product_images WHERE product_id = %s
                          ORDER BY is_primary DESC, display_order ASC""", (product_id,))
             rows = [_convert_datetime_fields(dict(row)) for row in c.fetchall()]
@@ -284,6 +320,7 @@ def get_product_images(product_id: int) -> List[Dict]:
     else:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
+        # Sort by: primary first, then by upload selection order (display_order)
         c.execute("""SELECT * FROM product_images WHERE product_id = ?
                      ORDER BY is_primary DESC, display_order ASC""", (product_id,))
         rows = c.fetchall()
@@ -325,6 +362,41 @@ def reorder_product_images(product_id: int, image_ids: List[int]) -> bool:
     conn.commit()
     conn.close()
     return True
+
+
+def update_image_taken_at(image_id: int, taken_at) -> bool:
+    """Update taken_at for a product image"""
+    conn = get_connection()
+    c = conn.cursor()
+
+    if USE_POSTGRES:
+        c.execute("UPDATE product_images SET taken_at = %s WHERE id = %s", (taken_at, image_id))
+    else:
+        c.execute("UPDATE product_images SET taken_at = ? WHERE id = ?", (taken_at, image_id))
+
+    conn.commit()
+    success = c.rowcount > 0
+    conn.close()
+    return success
+
+
+def get_all_product_images() -> list:
+    """Get all product images"""
+    conn = get_connection()
+
+    if USE_POSTGRES:
+        with conn.cursor(row_factory=dict_row) as c:
+            c.execute("SELECT * FROM product_images")
+            rows = [_convert_datetime_fields(dict(row)) for row in c.fetchall()]
+        conn.close()
+        return rows
+    else:
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM product_images")
+        rows = c.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
 
 
 def _parse_product(row) -> Dict:
@@ -375,12 +447,22 @@ def get_all_products() -> List[Dict]:
 
     if USE_POSTGRES:
         with conn.cursor(row_factory=dict_row) as c:
-            c.execute("SELECT * FROM products ORDER BY created_at DESC")
+            # Sort by primary image's taken_at (oldest first), fall back to product created_at
+            c.execute("""
+                SELECT p.* FROM products p
+                LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = true
+                ORDER BY COALESCE(pi.taken_at, p.created_at) DESC
+            """)
             rows = [dict(row) for row in c.fetchall()]  # Convert to dicts before closing
     else:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        c.execute("SELECT * FROM products ORDER BY created_at DESC")
+        # Sort by primary image's taken_at (oldest first), fall back to product created_at
+        c.execute("""
+            SELECT p.* FROM products p
+            LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = 1
+            ORDER BY COALESCE(pi.taken_at, p.created_at) DESC
+        """)
         rows = [dict(row) for row in c.fetchall()]
 
     conn.close()
@@ -509,12 +591,24 @@ def get_products_by_category(category: str) -> List[Dict]:
 
     if USE_POSTGRES:
         with conn.cursor(row_factory=dict_row) as c:
-            c.execute("SELECT * FROM products WHERE category = %s ORDER BY created_at DESC", (category,))
+            # Sort by primary image's taken_at (oldest first), fall back to product created_at
+            c.execute("""
+                SELECT p.* FROM products p
+                LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = true
+                WHERE p.category = %s
+                ORDER BY COALESCE(pi.taken_at, p.created_at) DESC
+            """, (category,))
             rows = [dict(row) for row in c.fetchall()]  # Convert to dicts before closing
     else:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        c.execute("SELECT * FROM products WHERE category = ? ORDER BY created_at DESC", (category,))
+        # Sort by primary image's taken_at (oldest first), fall back to product created_at
+        c.execute("""
+            SELECT p.* FROM products p
+            LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = 1
+            WHERE p.category = ?
+            ORDER BY COALESCE(pi.taken_at, p.created_at) DESC
+        """, (category,))
         rows = [dict(row) for row in c.fetchall()]
 
     conn.close()

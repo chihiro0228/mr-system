@@ -3,12 +3,14 @@ Image format conversion utilities
 Handles HEIC/HEIF to JPEG conversion for iPhone photos
 """
 import os
-from typing import Tuple
+from datetime import datetime
+from typing import Tuple, Optional
 
 # Try to import pillow-heif for HEIC support
 try:
     from pillow_heif import register_heif_opener
     from PIL import Image
+    from PIL.ExifTags import TAGS
     register_heif_opener()
     HEIC_SUPPORTED = True
 except ImportError:
@@ -20,6 +22,40 @@ def is_heic_file(filename: str) -> bool:
     """Check if file is HEIC/HEIF format"""
     ext = os.path.splitext(filename)[1].lower()
     return ext in ['.heic', '.heif']
+
+
+def get_photo_taken_at(file_path: str) -> Optional[datetime]:
+    """
+    Extract photo taken datetime from EXIF data
+
+    Args:
+        file_path: Path to image file
+
+    Returns:
+        datetime object if found, None otherwise
+    """
+    if not HEIC_SUPPORTED:
+        return None
+
+    try:
+        with Image.open(file_path) as img:
+            exif_data = img._getexif()
+            if not exif_data:
+                return None
+
+            # Look for DateTimeOriginal (tag 36867) or DateTimeDigitized (tag 36868)
+            for tag_id, value in exif_data.items():
+                tag = TAGS.get(tag_id, tag_id)
+                if tag == 'DateTimeOriginal':
+                    # EXIF datetime format: "YYYY:MM:DD HH:MM:SS"
+                    return datetime.strptime(value, "%Y:%m:%d %H:%M:%S")
+                elif tag == 'DateTimeDigitized':
+                    return datetime.strptime(value, "%Y:%m:%d %H:%M:%S")
+
+            return None
+    except Exception as e:
+        print(f"Error reading EXIF data: {e}")
+        return None
 
 
 def convert_heic_to_jpeg(input_path: str, output_path: str = None) -> Tuple[str, bool]:

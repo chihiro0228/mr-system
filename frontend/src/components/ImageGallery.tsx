@@ -8,6 +8,14 @@ interface ImageGalleryProps {
   productName: string;
 }
 
+// Cloudinary画像を最適化
+function getOptimizedImageUrl(url: string, width: number): string {
+  if (url.includes("res.cloudinary.com") && url.includes("/upload/")) {
+    return url.replace("/upload/", `/upload/w_${width},q_auto,f_auto/`);
+  }
+  return url.startsWith("http") ? url : `${API_BASE_URL}${url}`;
+}
+
 export default function ImageGallery({ images, productName }: ImageGalleryProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -23,23 +31,18 @@ export default function ImageGallery({ images, productName }: ImageGalleryProps)
     );
   }
 
-  const getImageUrl = (path: string) => {
-    if (path.startsWith("http")) {
-      return path;
-    }
-    return `${API_BASE_URL}${path}`;
-  };
-
   const currentImage = images[selectedIndex];
 
   return (
     <div className="space-y-3">
-      {/* Main Image */}
+      {/* Main Image - 800px幅に最適化 */}
       <div className="aspect-square relative bg-gray-100 rounded-lg overflow-hidden">
         <img
-          src={getImageUrl(currentImage)}
+          src={getOptimizedImageUrl(currentImage, 800)}
           alt={`${productName} - ${selectedIndex + 1}`}
           className="w-full h-full object-contain"
+          loading="lazy"
+          decoding="async"
         />
         {images.length > 1 && (
           <div className="absolute bottom-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
@@ -48,7 +51,7 @@ export default function ImageGallery({ images, productName }: ImageGalleryProps)
         )}
       </div>
 
-      {/* Thumbnails */}
+      {/* Thumbnails - 100px幅に最適化 */}
       {images.length > 1 && (
         <div className="flex gap-2 overflow-x-auto pb-2">
           {images.map((image, index) => (
@@ -62,9 +65,11 @@ export default function ImageGallery({ images, productName }: ImageGalleryProps)
               }`}
             >
               <img
-                src={getImageUrl(image)}
+                src={getOptimizedImageUrl(image, 100)}
                 alt={`${productName} thumbnail ${index + 1}`}
                 className="w-full h-full object-cover"
+                loading="lazy"
+                decoding="async"
               />
             </button>
           ))}

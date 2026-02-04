@@ -7,10 +7,24 @@ interface ProductCardProps {
   product: Product;
 }
 
+// Cloudinary画像を最適化（サムネイル生成）
+function getOptimizedImageUrl(url: string | undefined, width: number = 400): string {
+  if (!url) return "";
+
+  // Cloudinary URLの場合、変換パラメータを追加
+  if (url.includes("res.cloudinary.com") && url.includes("/upload/")) {
+    // /upload/ の後に変換パラメータを挿入
+    return url.replace(
+      "/upload/",
+      `/upload/w_${width},q_auto,f_auto/`
+    );
+  }
+
+  return url.startsWith("http") ? url : `${API_BASE_URL}${url}`;
+}
+
 export default function ProductCard({ product }: ProductCardProps) {
-  const imageUrl = product.image_path?.startsWith("http")
-    ? product.image_path
-    : `${API_BASE_URL}${product.image_path}`;
+  const imageUrl = getOptimizedImageUrl(product.image_path, 400);
 
   const appealsArray = Array.isArray(product.appeals)
     ? product.appeals.slice(0, 2)
@@ -25,6 +39,8 @@ export default function ProductCard({ product }: ProductCardProps) {
             src={imageUrl}
             alt={product.product_name || "Product image"}
             className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+            loading="lazy"
+            decoding="async"
             onError={(e) => {
               // Fallback if image fails to load
               e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Crect width='400' height='400' fill='%23f3f4f6'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='24' fill='%239ca3af'%3ENo Image%3C/text%3E%3C/svg%3E";
